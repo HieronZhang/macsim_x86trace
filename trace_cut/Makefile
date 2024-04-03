@@ -1,6 +1,6 @@
 CC = g++
 CFLAGS = -O3 -g
-LIBS = -lz
+LIBS = -lz -pthread
 
 TARGET = main
 
