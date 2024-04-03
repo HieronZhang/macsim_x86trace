@@ -31,19 +31,24 @@ int main() {
         }
 
 
-        char buffer[ELEMENT_SIZE];
+        char buffer[ELEMENT_SIZE*1000];
         long instruction_total_num = 0;
         long index = 0;
 
-        while (gzread(file, buffer, ELEMENT_SIZE) > 0)
+        while (gzread(file, buffer, ELEMENT_SIZE*1000) > 0)
         {
-            instruction_total_num++;
-            index++;
+            instruction_total_num+=1000;
+            index+=1000;
 
             // if (index > 20 && index < 41 || index > 50)
             // {
-            //     gzwrite(newFile, buffer, ELEMENT_SIZE);
+            //     gzwrite(newFile, buffer, ELEMENT_SIZE*1000);
             // }
+
+            if (instruction_total_num % 1000000 == 0)
+            {
+                std::cout << "Current number of instructions: " << instruction_total_num << std::endl;
+            }
         }
 
         std::cout << "Total number of instructions: " << instruction_total_num << std::endl;
@@ -54,7 +59,7 @@ int main() {
         // Close the output file
         gzclose(newFile);
 
-        std::cout << "Successfully copied elements 20 to 40 and 50 to end to new file." << std::endl;
+        // std::cout << "Successfully copied elements 20 to 40 and 50 to end to new file." << std::endl;
 
     }
 
