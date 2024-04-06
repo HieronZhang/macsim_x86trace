@@ -121,6 +121,7 @@ map<ADDRINT, Inst_info *> g_inst_storage[MAX_THREADS];
 PIN_LOCK g_lock;
 UINT64 g_inst_count[MAX_THREADS] = {0};
 INT64 g_start_inst_count[MAX_THREADS] = {0};
+UINT64 last_count[MAX_THREADS] = {0};
 map<THREADID, THREADID> threadMap;
 THREADID main_thread_id;
 Thread_info thread_info[MAX_THREADS];
@@ -410,6 +411,7 @@ void write_inst(ADDRINT iaddr, THREADID threadid)
       exit(0);
     }
     trace_info->bytes_accumulated = 0;
+    // cout << tid << ": write inst #" << g_inst_count[tid] << endl;
   }
 
   // ----------------------------------------
@@ -436,8 +438,6 @@ void write_inst(ADDRINT iaddr, THREADID threadid)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Trace Instrumentation
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-UINT64 last_count[MAX_THREADS] = {0};
 
 VOID PIN_FAST_ANALYSIS_CALL INST_count(UINT32 count)
 {
@@ -519,34 +519,44 @@ VOID PIN_FAST_ANALYSIS_CALL INST_count(UINT32 count)
   PIN_ReleaseLock(&g_lock);
 
   // Added by Lifeng
-  if (manual_simpoint == true && g_enable_thread_instrument[tid] == false && sim_begin[tid] == true && sim_end[tid] == false)
-  {
-    if (g_inst_count[tid] >= Knob_skip.Value() + g_start_inst_count[tid])
-    {
-      cout << "-> Thread " << tid << " starts instrumentation at " << g_inst_count[tid] << endl;
-      g_start_inst_count[tid] = g_inst_count[tid];
-      g_enable_thread_instrument[tid] = true;
-    }
-  }
-#if 0
-  if (Knob_skip.Value() > 0 && g_inst_count[tid] >= Knob_skip.Value()) {
-    if (g_start_inst_count[tid] == -1) {
+  // if (manual_simpoint == true && g_enable_thread_instrument[tid] == false && sim_begin[tid] == true && sim_end[tid] == false)
+  // {
+  //   if (g_inst_count[tid] >= Knob_skip.Value() + g_start_inst_count[tid])
+  //   {
+  //     cout << "-> Thread " << tid << " starts instrumentation at " << g_inst_count[tid] << endl;
+  //     g_start_inst_count[tid] = g_inst_count[tid];
+  //     g_enable_thread_instrument[tid] = true;
+  //   }
+  // }
+// #if 0
+  // if (Knob_skip.Value() > 0 && g_inst_count[tid] >= Knob_skip.Value()) {
+  //   if (g_start_inst_count[tid] == 0) {
+  //     cout << "-> Thread " << tid << " starts instrumentation at " << g_inst_count[tid] << "\n";
+  //     g_start_inst_count[tid] = g_inst_count[tid];
+  //     g_enable_thread_instrument[tid] = true;
+  //   }
+  // } else {
+  //   g_enable_thread_instrument[tid] = false;
+  // } 
+  if (g_enable_thread_instrument[tid] == false && Knob_skip.Value() > 0 && g_inst_count[0] >= Knob_skip.Value()) {
+    if (g_start_inst_count[tid] == 0) {
       cout << "-> Thread " << tid << " starts instrumentation at " << g_inst_count[tid] << "\n";
       g_start_inst_count[tid] = g_inst_count[tid];
       g_enable_thread_instrument[tid] = true;
     }
-  } else {
-    g_enable_thread_instrument[tid] = false;
-  } 
-
-
-  if (Knob_max.Value() > 0 && g_start_inst_count[tid] != -1 && g_inst_count[tid] >= Knob_max.Value() + g_start_inst_count[tid]) {
-    g_enable_thread_instrument[tid] = false; 
-    cout << "-> Thread " << tid << " reachea at max instrunction count " << g_inst_count[tid] << endl;
-    finish();
-    exit(0);
   }
-#endif
+  // else {
+  //   g_enable_thread_instrument[tid] = false;
+  // } 
+
+
+  // if (Knob_max.Value() > 0 && g_start_inst_count[tid] != 0 && g_inst_count[tid] >= Knob_max.Value() + g_start_inst_count[tid]) {
+  //   g_enable_thread_instrument[tid] = false; 
+  //   cout << "-> Thread " << tid << " reaches at max instrunction count " << g_inst_count[tid] << endl;
+  //   finish();
+  //   exit(0);
+  // }
+// #endif
 }
 
 VOID INST_trace(TRACE trace, VOID *v)
