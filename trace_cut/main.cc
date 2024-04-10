@@ -45,6 +45,7 @@ void* do_trace_cut(void* arg) {
     char buffer[ELEMENT_SIZE*10000];
     long instruction_total_num = 0;
     long index = 0;
+    long start_offset = 100;
     long total = 31943952625;
     long ck1 = total / 10 * 1;
     long ck2 = total / 10 * 3;
@@ -58,13 +59,25 @@ void* do_trace_cut(void* arg) {
         instruction_total_num+=10000;
         index+=10000;
 
-        if ((index > ck1 && index <= ck1 + delta) || (index > ck2 && index <= ck2 + delta) || (index > ck3 && index <= ck3 + delta) || (index > ck4 && index <= ck4 + delta) || (index > ck5 && index <= ck5 + delta))
-        {
-            gzwrite(newFile, buffer, ELEMENT_SIZE*10000);
+        if(i==0){
+            if ((index > ck1+start_offset && index <= ck1+start_offset  + delta) || (index > ck2+start_offset  && index <= ck2+start_offset  + delta) || (index > ck3+start_offset  && index <= ck3+start_offset  + delta) || (index > ck4+start_offset  && index <= ck4+start_offset  + delta) || (index > ck5+start_offset  && index <= ck5+start_offset + delta))
+            {
+                gzwrite(newFile, buffer, ELEMENT_SIZE*10000);
+            }
+            else if(index > ck5 + delta+start_offset )
+                break;
         }
-        else if(index > ck5 + delta)
-            break;
-
+        else
+        {
+            if ((index > ck1 && index <= ck1 + delta) || (index > ck2 && index <= ck2 + delta) || (index > ck3 && index <= ck3 + delta) || (index > ck4 && index <= ck4 + delta) || (index > ck5 && index <= ck5 + delta))
+            {
+                gzwrite(newFile, buffer, ELEMENT_SIZE*10000);
+            }
+            else if(index > ck5 + delta)
+                break;
+        }
+        
+        
         if (instruction_total_num % 10000000 == 0)
         {
             std::cout << "Current number of instructions: " << instruction_total_num << std::endl;
