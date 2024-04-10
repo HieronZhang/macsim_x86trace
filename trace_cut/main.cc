@@ -42,26 +42,28 @@ void* do_trace_cut(void* arg) {
     }
 
 
-    char buffer[ELEMENT_SIZE*1000];
+    char buffer[ELEMENT_SIZE*10000];
     long instruction_total_num = 0;
     long index = 0;
     long total = 31943952625;
-    long ck1 = 31943952625 / 10 * 1;
-    long ck2 = 31943952625 / 10 * 3;
-    long ck3 = 31943952625 / 10 * 5;
-    long ck4 = 31943952625 / 10 * 7;
-    long ck5 = 31943952625 / 10 * 9;
+    long ck1 = total / 10 * 1;
+    long ck2 = total / 10 * 3;
+    long ck3 = total / 10 * 5;
+    long ck4 = total / 10 * 7;
+    long ck5 = total / 10 * 9;
     long delta = 1000000;
 
-    while (gzread(file, buffer, ELEMENT_SIZE*1000) > 0)
+    while (gzread(file, buffer, ELEMENT_SIZE*10000) > 0)
     {
-        instruction_total_num+=1000;
-        index+=1000;
+        instruction_total_num+=10000;
+        index+=10000;
 
         if ((index > ck1 && index <= ck1 + delta) || (index > ck2 && index <= ck2 + delta) || (index > ck3 && index <= ck3 + delta) || (index > ck4 && index <= ck4 + delta) || (index > ck5 && index <= ck5 + delta))
         {
-            gzwrite(newFile, buffer, ELEMENT_SIZE*1000);
+            gzwrite(newFile, buffer, ELEMENT_SIZE*10000);
         }
+        else if(index > ck5 + delta)
+            break;
 
         if (instruction_total_num % 10000000 == 0)
         {
