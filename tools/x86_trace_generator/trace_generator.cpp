@@ -28,6 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include <iostream>
 #include <map>
+#include <iomanip>
 #include <set>
 #include <assert.h>
 #include <zlib.h>
@@ -37,11 +38,28 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <cmath>
 #include <queue>
 #include <list>
+#include <string>
+#include <vector>
+#include <unordered_map>
 
 #include "pin.H"
 #include "../InstLib/instlib.H"
 #include "control_manager.H"
 #include "trace_generator.h"
+
+
+using std::string;
+using std::hex;
+using std::ios;
+using std::setw;
+using std::cerr;
+using std::dec;
+using std::endl;
+
+
+using std::unordered_map;
+using std::vector;
+using std::ofstream;
 
 /*
  * 1. all function of which name start with a capatal letter is used by PIN
@@ -113,6 +131,259 @@ struct inst_t
 
 map<ADDRINT, inst_t *> g_inst_map;
 
+
+
+/* ===================================================================== */
+/* Set Associative Cache Filter */
+/* ===================================================================== */
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+struct LRU_node{
+    LRU_node* prev;
+    LRU_node* next;
+    int64_t cl_index;
+};
+
+class LRU_list{
+    public:
+        LRU_node* head;
+        LRU_node* tail;
+        LRU_list(){head = nullptr; tail = nullptr;};
+};
+
+
+struct cache_obj
+{
+    bool isdirty;
+    LRU_node* node;
+};
+
+
+struct eviction
+{
+    // return 0 for no-eviction, return 1 for eviction-only, return 2 for flush
+    int condition;
+    int64_t index;
+};
+
+
+class fcache{
+    public:
+        std::unordered_map<int64_t, cache_obj> cachemem;
+        LRU_list LRUlist;
+        int64_t cache_size_CL;
+        int64_t curr_size;
+        fcache(int64_t size);
+        void insert(int64_t index);
+        void remove(int64_t index);
+        bool is_hit(int64_t index);
+        eviction miss_evict(int64_t index);
+        void readhitCL(int64_t index);
+        void writehitCL(int64_t index);
+};
+
+
+class sa_cache{
+    public:
+        int way;
+        int64_t size_byte;
+        int64_t num_sets;
+        std::vector<fcache> sets;
+        sa_cache(int64_t size_in_byte, int way);
+        void insert(int64_t index);
+        void remove(int64_t index);
+        bool is_hit(int64_t index);
+        eviction miss_evict(int64_t index);
+        void readhitCL(int64_t index);
+        void writehitCL(int64_t index);
+};
+
+
+
+fcache::fcache(int64_t size){
+    cache_size_CL = size/64;
+    curr_size = 0;
+}
+
+void fcache::insert(int64_t index){
+    assert(curr_size < cache_size_CL);
+    cache_obj new_obj;
+    new_obj.isdirty = false;
+    new_obj.node = new LRU_node;
+    new_obj.node->prev = nullptr;
+    new_obj.node->next = nullptr;
+    new_obj.node->cl_index = index;
+    if (LRUlist.tail==nullptr)
+    {
+        LRUlist.head = new_obj.node;
+        LRUlist.tail = new_obj.node;
+    }else
+    {
+        LRUlist.tail->next = new_obj.node;
+        new_obj.node->prev = LRUlist.tail;
+        LRUlist.tail = new_obj.node;
+    }
+    cachemem[index] = new_obj;
+    curr_size++;
+}
+
+void fcache::remove(int64_t index){
+    assert(curr_size>0);
+    cachemem.erase(index);
+    curr_size--;
+}
+
+bool fcache::is_hit(int64_t index){
+    return (cachemem.find(index)!= cachemem.end());
+}
+
+eviction fcache::miss_evict(int64_t index){
+    if (curr_size < cache_size_CL)
+    {
+        eviction ev;
+        ev.condition = 0;
+        ev.index = 0;
+        return ev;
+    }else
+    {
+        assert(LRUlist.head!=nullptr);
+        LRU_node* evi = LRUlist.head;
+        LRUlist.head->next->prev = nullptr;
+        LRUlist.head = evi->next;
+        bool is_dirty = cachemem[evi->cl_index].isdirty;
+        remove(evi->cl_index);
+        eviction eev;
+        if (is_dirty)
+        {
+            eev.condition = 2;
+        }
+        else
+        {
+            eev.condition = 1;
+        }
+        eev.index = evi->cl_index;
+        delete evi;
+        return eev;
+    }
+}
+
+
+void fcache::readhitCL(int64_t index){
+    LRU_node* node = cachemem[index].node;
+    if (node!=LRUlist.tail)
+    {
+        node->next->prev = node->prev;
+        if (node->prev!=nullptr)
+        {
+            node->prev->next = node->next;
+        } else
+        {
+            LRUlist.head = node->next;
+        }
+        
+        LRUlist.tail->next = node;
+        node->prev = LRUlist.tail;
+        node->next = nullptr;
+        LRUlist.tail = node;
+    }
+}
+
+
+void fcache::writehitCL(int64_t index){
+    readhitCL(index);
+    cachemem[index].isdirty = true;
+}
+
+
+
+sa_cache::sa_cache(int64_t size_in_byte, int way){
+    this->way = way;
+    this->size_byte = size_in_byte;
+    int64_t bank_size = size_byte / way;
+    num_sets = bank_size / 64;
+    for (int i = 0; i < num_sets; i++)
+    {
+        sets.emplace_back(way*64);
+    }
+}
+
+void sa_cache::insert(int64_t index){
+    int set_index = index % num_sets;
+    sets[set_index].insert(index / num_sets);
+}
+
+void sa_cache::remove(int64_t index){
+    int set_index = index % num_sets;
+    sets[set_index].remove(index / num_sets);
+}
+
+bool sa_cache::is_hit(int64_t index){
+    int set_index = index % num_sets;
+    return sets[set_index].is_hit(index / num_sets);
+}
+
+eviction sa_cache::miss_evict(int64_t index){
+    int set_index = index % num_sets;
+    eviction evi = sets[set_index].miss_evict(index / num_sets);
+    evi.index = evi.index * num_sets + set_index;
+    return evi;
+}
+
+void sa_cache::readhitCL(int64_t index){
+    int set_index = index % num_sets;
+    sets[set_index].readhitCL(index / num_sets);
+}
+
+void sa_cache::writehitCL(int64_t index){
+    int set_index = index % num_sets;
+    sets[set_index].writehitCL(index / num_sets);
+}
+
+
+
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+
+
+
+/* ===================================================================== */
+/* Global Variables  of Pinatrace tool */
+/* ===================================================================== */
+// static vector<std::ofstream> TraceFiles;
+static std::ofstream TraceFiles[100];
+static vector<sa_cache> Caches;
+
+static vector<VOID*> WriteAddr;
+static vector<INT32> WriteSize;
+// PIN_LOCK pinLock;
+UINT64 threadCount = 0; //total number of threads, including main thread
+
+double cpu_base_frequency() {
+    return 2.4; //For cloudlab c6525-25g machines
+
+    // std::regex re("model name\\s*:[^@]+@\\s*([0-9.]+)\\s*GHz");
+    // std::ifstream cpuinfo("/proc/cpuinfo");
+    // std::smatch m;
+    // for (std::string line; getline(cpuinfo, line);) {
+    //     regex_match(line, m, re);
+    //     if (m.size() == 2)
+    //         return std::stod(m[1]);
+    // }
+    // return 1; // Couldn't determine the CPU base frequency. Just count TSC ticks.
+}
+double const CPU_GHZ_INV = 1 / cpu_base_frequency();
+
+struct TraceSample {
+    uint64_t ns;
+    uint64_t addr;
+    uint8_t  r;
+    uint8_t  size;
+} __attribute((__packed__));
+
+
+bool enable_memory_pinatrace = true;
+
+
 /////////////////////////////////////////////////////////////////////////////////////////
 /// global variables
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -135,6 +406,7 @@ unsigned int func_count = 0;
 using namespace CONTROLLER;
 bool g_enable_thread_instrument[MAX_THREADS];
 bool g_enable_instrument = false;
+bool fulled[MAX_THREADS];
 
 /////////////////////////////////////////////////////////////////////////////////////////
 // knob variables (Knob_xxx_yyy)
@@ -156,6 +428,12 @@ Knob(UINT64, Knob_skip_thread0, "skip_thread0", "0", "skip thread 0");
 Knob(UINT64, Knob_max, "max", "0", "Max number of instruction to collect");
 Knob(UINT64, Knob_rtn_min, "rmin", "0", "Max number of function calls to collect data");
 Knob(UINT64, Knob_rtn_max, "rmax", "0", "Max number of function calls to collect data");
+Knob(bool, Knob_pinatrace, "pinatrace", "1", "Enable pinatrace or not");
+
+KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool",
+    "o", "pinatrace.out", "specify trace file name");
+KNOB<BOOL> KnobValues(KNOB_MODE_WRITEONCE, "pintool",
+    "values", "1", "Output memory values reads and written");
 
 //Added by Lifeng
 // knob variables and global variable
@@ -239,7 +517,7 @@ void IncrementNumInstruction(THREADID threadid)
   if (!g_enable_thread_instrument[tid])
     return;
 
-  if (Knob_max.Value() != 0 && Knob_max.Value() > g_inst_count[tid])
+  if (Knob_max.Value() != 0 && Knob_max.Value() > g_inst_count[tid] - g_start_inst_count[tid])
   {
     g_enable_thread_instrument[tid] = false;
     PIN_GetLock(&g_lock, tid + 1);
@@ -464,7 +742,8 @@ VOID PIN_FAST_ANALYSIS_CALL INST_count(UINT32 count)
   // Added by Lifeng
   if (Knob_max.Value() > 0 && g_enable_thread_instrument[tid] == true && sim_end[tid] == false && g_inst_count[tid] >= Knob_max.Value() + g_start_inst_count[tid])
   {
-    sim_end[tid] = true;
+    // sim_end[tid] = true;
+    fulled[tid] = true;
   }
   if (tid == 0 && sim_end[tid] == true && g_enable_thread_instrument[tid] == true)
   {
@@ -538,11 +817,13 @@ VOID PIN_FAST_ANALYSIS_CALL INST_count(UINT32 count)
   // } else {
   //   g_enable_thread_instrument[tid] = false;
   // } 
-  if (g_enable_thread_instrument[tid] == false && Knob_skip.Value() > 0 && g_inst_count[0] >= Knob_skip.Value()) {
+  //TODO: Modify here:
+  if (g_enable_thread_instrument[tid] == false && Knob_skip.Value() > 0 && g_inst_count[4] >= Knob_skip.Value()) {
     if (g_start_inst_count[tid] == 0) {
       cout << "-> Thread " << tid << " starts instrumentation at " << g_inst_count[tid] << "\n";
       g_start_inst_count[tid] = g_inst_count[tid];
       g_enable_thread_instrument[tid] = true;
+      enable_memory_pinatrace = false;
     }
   }
   // else {
@@ -571,6 +852,83 @@ VOID INST_trace(TRACE trace, VOID *v)
 // Instruction  Instrumentation
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+
+static VOID RecordMem(VOID* ip, CHAR r, VOID* addr, INT32 size, THREADID threadid) {
+    uint64_t ns;
+    TraceSample sample[2];
+    uint64_t memaddr = (uint64_t) addr;
+    int64_t clindex = memaddr / 64;
+
+    if (Caches[threadid].is_hit(clindex))
+    {
+        if (r == 'R')
+        {
+            Caches[threadid].readhitCL(clindex);
+        }
+        else if (r == 'W')
+        {
+            Caches[threadid].writehitCL(clindex);
+        } 
+        else
+        {
+            assert(0);
+        }
+    }
+    else
+    {
+        eviction evi = Caches[threadid].miss_evict(clindex);
+        if (evi.condition == 2)
+        {
+            ns = __builtin_ia32_rdtsc() * CPU_GHZ_INV;
+            sample[0].ns = ns;
+            sample[0].addr = evi.index * 64;
+            sample[0].r = 'W';
+            sample[0].size = 64; 
+            TraceFiles[threadid].write((char *) &sample[0], sizeof(TraceSample));
+        }
+
+        Caches[threadid].insert(clindex);
+        if (r == 'R')
+        {
+            Caches[threadid].readhitCL(clindex);
+        }
+        else if (r == 'W')
+        {
+            Caches[threadid].writehitCL(clindex);
+        } 
+        else
+        {
+            assert(0);
+        }
+
+        // timestamp 0 addr 8 rw
+        ns = __builtin_ia32_rdtsc() * CPU_GHZ_INV;
+        sample[1].ns = ns;
+        sample[1].addr = clindex * 64;
+        sample[1].r = 'R';
+        sample[1].size = 64;
+        TraceFiles[threadid].write((char *) &sample[1], sizeof(TraceSample));
+    }
+}
+
+static VOID RecordWriteAddrSize(VOID* addr, INT32 size, THREADID threadid) {
+    WriteAddr[threadid] = addr;
+    WriteSize[threadid] = size;
+}
+
+static VOID RecordMemWrite(VOID* ip, THREADID threadid) {
+    RecordMem(ip, 'W', WriteAddr[threadid], WriteSize[threadid], threadid);
+}
+
+
+
+
+
+
+
+
+
 /*
 * Main instrumentation routine
 * Depending on the type of an instruction, call corresponding subroutines.
@@ -586,8 +944,43 @@ void instrument(INS ins)
   if (tid == 100000)
     return;
 
+
+  if (enable_memory_pinatrace && Knob_pinatrace.Value())
+  {
+    if (INS_IsMemoryRead(ins) && INS_IsStandardMemop(ins)) {
+        INS_InsertPredicatedCall(ins, IPOINT_BEFORE, (AFUNPTR)RecordMem, IARG_INST_PTR, IARG_UINT32, 'R', IARG_MEMORYREAD_EA,
+                                 IARG_MEMORYREAD_SIZE,  IARG_THREAD_ID, IARG_END);
+    }
+
+    if (INS_HasMemoryRead2(ins) && INS_IsStandardMemop(ins)) {
+        INS_InsertPredicatedCall(ins, IPOINT_BEFORE, (AFUNPTR)RecordMem, IARG_INST_PTR, IARG_UINT32, 'R', IARG_MEMORYREAD2_EA,
+                                 IARG_MEMORYREAD_SIZE,  IARG_THREAD_ID, IARG_END);
+    }
+
+    // instruments stores using a predicated call, i.e.
+    // the call happens iff the store will be actually executed
+    if (INS_IsMemoryWrite(ins) && INS_IsStandardMemop(ins)) {
+        INS_InsertPredicatedCall(ins, IPOINT_BEFORE, (AFUNPTR)RecordWriteAddrSize, IARG_MEMORYWRITE_EA, IARG_MEMORYWRITE_SIZE, 
+                                 IARG_THREAD_ID, IARG_END);
+
+        if (INS_IsValidForIpointAfter(ins)) {
+            INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR)RecordMemWrite, IARG_INST_PTR, IARG_THREAD_ID, IARG_END);
+        }
+        if (INS_IsValidForIpointTakenBranch(ins)) {
+            INS_InsertCall(ins, IPOINT_TAKEN_BRANCH, (AFUNPTR)RecordMemWrite, IARG_INST_PTR, IARG_THREAD_ID, IARG_END);
+        }
+    }
+  }
+  
   if (!g_enable_thread_instrument[tid])
     return;
+
+
+  if (fulled[tid])
+  {
+    return;
+  }
+  
 
   set<LEVEL_BASE::REG> src_regs;
   set<LEVEL_BASE::REG> dst_regs;
@@ -1026,7 +1419,31 @@ void ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, void *v)
     cerr << "error opening file for writing\n";
     exit(-1);
   }
+
+  if (Knob_pinatrace.Value())
+  {
+    if (threadid == 100) {
+        string filename = KnobOutputFile.Value() + "." + decstr(threadid);
+        // TraceFiles.push_back(std::ofstream((filename.c_str())));
+        // TraceFiles.resize(threadid+1);
+        // TraceFiles[threadid].open(filename.c_str());
+        printf("More than 100 threads!\n");
+        exit(1);
+    }
+    else if (threadid == WriteAddr.size())
+    {
+        WriteAddr.push_back(0);
+        WriteSize.push_back(0);
+        Caches.emplace_back(2 * 1024 * 1024, 16);
+        string filename = KnobOutputFile.Value() + "." + decstr(threadid);
+        TraceFiles[threadid].open(filename.c_str());
+    } else {
+        printf("Thread %d duplicates\n", threadid);
+        PIN_ExitProcess(1);
+    }
+  }
 }
+
 
 /////////////////////////////////////////////////////////////////////////////////////////
 /// Thread end function : instrumentation
@@ -1094,6 +1511,11 @@ void thread_end(THREADID threadid)
 void Fini(INT32 code, void *v)
 {
   finish();
+
+  for (unsigned int TraceFileID = 0; TraceFileID < 100; TraceFileID++){
+      TraceFiles[TraceFileID].close();
+  }
+
 }
 
 /*
@@ -1166,6 +1588,7 @@ void initialize(void)
     // thread instrument is disabled at the beginning if manual simpoint is set.
     g_enable_thread_instrument[ii] = manual_simpoint ? false : true;
     g_inst_print_count[ii] = 0;
+    fulled[ii] = false;
   }
 
   // Initialize Lock
@@ -1454,8 +1877,14 @@ int main(int argc, char *argv[])
     return -1;
   }
 
-  initialize();
-  sanity_check();
+  // TraceFiles.reserve(100);
+  Caches.reserve(100);
+  WriteAddr.reserve(100);
+  WriteSize.reserve(100);
+
+
+  initialize(); // no need to change
+  sanity_check(); // no need to change
 
   control.RegisterHandler(Handler, 0, FALSE);
   control.Activate();
@@ -1482,6 +1911,9 @@ int main(int argc, char *argv[])
   PIN_AddDetachFunction(Detach, 0);
   PIN_AddFiniFunction(Fini, 0);
   PIN_StartProgram();
+
+  RecordMemWrite(0,0);
+  RecordWriteAddrSize(0, 0,0);
 
   return 0;
 }
