@@ -564,6 +564,9 @@ void get_ld_ea(ADDRINT addr, UINT32 mem_read_size,
   THREADID tid = threadMap[threadid];
   THREAD_ENABLE_CHECK(tid);
 
+  if (!g_enable_thread_instrument[tid])
+    return;
+
   Trace_info *trace_info = trace_info_array[tid];
   if (trace_info == NULL)
     return;
@@ -584,6 +587,9 @@ void get_ld_ea2(ADDRINT addr1, ADDRINT addr2, UINT32 mem_read_size,
 {
   THREADID tid = threadMap[threadid];
   THREAD_ENABLE_CHECK(tid);
+
+  if (!g_enable_thread_instrument[tid])
+    return;
 
   Trace_info *trace_info = trace_info_array[tid];
   if (trace_info == NULL)
@@ -606,6 +612,9 @@ void get_st_ea(ADDRINT addr, UINT32 mem_st_size,
   THREADID tid = threadMap[threadid];
   THREAD_ENABLE_CHECK(tid);
 
+  if (!g_enable_thread_instrument[tid])
+    return;
+
   Trace_info *trace_info = trace_info_array[tid];
   if (trace_info == NULL)
     return;
@@ -622,6 +631,9 @@ void get_target(ADDRINT target, bool taken, THREADID threadid)
   THREADID tid = threadMap[threadid];
   THREAD_ENABLE_CHECK(tid);
 
+  if (!g_enable_thread_instrument[tid])
+    return;
+
   Trace_info *trace_info = trace_info_array[tid];
   if (trace_info == NULL)
     return;
@@ -636,6 +648,9 @@ void write_inst(ADDRINT iaddr, THREADID threadid)
 {
   THREADID tid = threadMap[threadid];
   THREAD_ENABLE_CHECK(tid);
+
+  if (!g_enable_thread_instrument[tid])
+    return;
 
   Trace_info *trace_info = trace_info_array[tid];
   Inst_info *static_inst = g_inst_storage[tid][iaddr];
@@ -863,6 +878,9 @@ VOID INST_trace(TRACE trace, VOID *v)
 
 
 static VOID RecordMem(VOID* ip, CHAR r, VOID* addr, INT32 size, THREADID threadid) {
+    if(!enable_memory_pinatrace)
+      return;
+
     uint64_t ns;
     TraceSample sample[2];
     uint64_t memaddr = (uint64_t) addr;
@@ -921,11 +939,17 @@ static VOID RecordMem(VOID* ip, CHAR r, VOID* addr, INT32 size, THREADID threadi
 }
 
 static VOID RecordWriteAddrSize(VOID* addr, INT32 size, THREADID threadid) {
+    if(!enable_memory_pinatrace)
+      return;
+
     WriteAddr[threadid] = addr;
     WriteSize[threadid] = size;
 }
 
 static VOID RecordMemWrite(VOID* ip, THREADID threadid) {
+    if(!enable_memory_pinatrace)
+        return;
+
     RecordMem(ip, 'W', WriteAddr[threadid], WriteSize[threadid], threadid);
 }
 
@@ -953,7 +977,7 @@ void instrument(INS ins)
     return;
 
 
-  if (enable_memory_pinatrace && Knob_pinatrace.Value())
+  if (Knob_pinatrace.Value())
   {
     if (INS_IsMemoryRead(ins) && INS_IsStandardMemop(ins)) {
         INS_InsertPredicatedCall(ins, IPOINT_BEFORE, (AFUNPTR)RecordMem, IARG_INST_PTR, IARG_UINT32, 'R', IARG_MEMORYREAD_EA,
@@ -980,14 +1004,14 @@ void instrument(INS ins)
     }
   }
   
-  if (!g_enable_thread_instrument[tid])
-    return;
+  // if (!g_enable_thread_instrument[tid])
+  //   return;
 
 
-  if (fulled[tid])
-  {
-    return;
-  }
+  // if (fulled[tid])
+  // {
+  //   return;
+  // }
   
 
   set<LEVEL_BASE::REG> src_regs;
