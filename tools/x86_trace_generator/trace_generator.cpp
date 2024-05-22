@@ -824,6 +824,14 @@ VOID PIN_FAST_ANALYSIS_CALL INST_count(UINT32 count)
       g_start_inst_count[tid] = g_inst_count[tid];
       g_enable_thread_instrument[tid] = true;
       enable_memory_pinatrace = false;
+
+      if (Knob_pinatrace.Value())
+      {
+        for (unsigned int TraceFileID = 0; TraceFileID < 100; TraceFileID++){
+          TraceFiles[TraceFileID].close();
+        }
+      }
+	    
     }
   }
   // else {
