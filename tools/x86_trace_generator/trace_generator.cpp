@@ -833,7 +833,7 @@ VOID PIN_FAST_ANALYSIS_CALL INST_count(UINT32 count)
   //   g_enable_thread_instrument[tid] = false;
   // } 
   //TODO: Modify here:
-  if (g_enable_thread_instrument[tid] == false && Knob_skip.Value() > 0 && g_inst_count[4] >= Knob_skip.Value()) {
+  if (g_enable_thread_instrument[tid] == false && Knob_skip.Value() > 0 && g_inst_count[10] >= Knob_skip.Value()) {
     if (g_start_inst_count[tid] == 0) {
       cout << "-> Thread " << tid << " starts instrumentation at " << g_inst_count[tid] << "\n";
       g_start_inst_count[tid] = g_inst_count[tid];
